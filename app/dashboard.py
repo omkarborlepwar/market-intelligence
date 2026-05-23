@@ -37,6 +37,7 @@ st.markdown("""
 def load_stock_data(ticker, period):
     collector = StockDataCollector()
     df = collector.fetch_historical(ticker, period)
+    df = collector.compute_returns(df)
     df = collector.add_technical_indicators(df)
     return df, collector.get_company_info(ticker)
 
