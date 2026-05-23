@@ -108,10 +108,13 @@ with tab1:
         st.metric("Std Dev", f"${stats['std']:.2f}")
 
         st.divider()
-        stationarity = StatisticalAnalyzer.stationarity_test(df)
-        st.metric("ADF Statistic", f"{stationarity['adf_statistic']:.4f}")
-        st.metric("p-value", f"{stationarity['p_value']:.6f}")
-        st.markdown(f"**Stationary:** {'✅' if stationarity['is_stationary'] else '❌'}")
+        try:
+            stationarity = StatisticalAnalyzer.stationarity_test(df)
+            st.metric("ADF Statistic", f"{stationarity['adf_statistic']:.4f}")
+            st.metric("p-value", f"{stationarity['p_value']:.6f}")
+            st.markdown(f"**Stationary:** {'✅' if stationarity['is_stationary'] else '❌'}")
+        except Exception:
+            st.info("Insufficient data for stationarity test.")
 
         st.divider()
         var = StatisticalAnalyzer.calculate_var(df["close"].pct_change().dropna())
@@ -171,17 +174,20 @@ with tab3:
         st.divider()
         st.subheader("Sentiment vs Returns")
         if len(daily_sentiment) > 0:
-            sent_return_corr = CorrelationAnalyzer.sentiment_return_correlation(
-                daily_sentiment, df, "avg_compound", "daily_return"
-            )
-            sc1, sc2, sc3 = st.columns(3)
-            sc1.metric("Same-Day Correlation",
-                       f"{sent_return_corr['same_day']['correlation']:.3f}",
-                       f"p={sent_return_corr['same_day']['p_value']:.3f}")
-            sc2.metric("Next-Day Correlation",
-                       f"{sent_return_corr['next_day']['correlation']:.3f}",
-                       f"p={sent_return_corr['next_day']['p_value']:.3f}")
-            sc3.metric("Samples", sent_return_corr["n_samples"])
+            try:
+                sent_return_corr = CorrelationAnalyzer.sentiment_return_correlation(
+                    daily_sentiment, df, "avg_compound", "daily_return"
+                )
+                sc1, sc2, sc3 = st.columns(3)
+                sc1.metric("Same-Day Correlation",
+                           f"{sent_return_corr['same_day']['correlation']:.3f}",
+                           f"p={sent_return_corr['same_day']['p_value']:.3f}")
+                sc2.metric("Next-Day Correlation",
+                           f"{sent_return_corr['next_day']['correlation']:.3f}",
+                           f"p={sent_return_corr['next_day']['p_value']:.3f}")
+                sc3.metric("Samples", sent_return_corr["n_samples"])
+            except Exception:
+                st.info("Not enough overlapping data for sentiment-return correlation.")
     else:
         st.warning("Unable to fetch correlation data.")
 
@@ -195,31 +201,42 @@ with tab4:
     with col_a:
         predictor = PricePredictor()
         price_series = df.set_index("date")["close"]
-        arima_result = predictor.arima_forecast(price_series, forecast_steps=forecast_days)
-        st.plotly_chart(
-            ChartBuilder.forecast_chart(price_series, arima_result["forecast"], ticker),
-            use_container_width=True
-        )
+        try:
+            arima_result = predictor.arima_forecast(price_series, forecast_steps=forecast_days)
+            st.plotly_chart(
+                ChartBuilder.forecast_chart(price_series, arima_result["forecast"], ticker),
+                use_container_width=True
+            )
+        except Exception:
+            st.warning("Insufficient data for ARIMA forecasting. Try a longer time period.")
+            arima_result = None
     with col_b:
-        st.metric("ARIMA Order", str(arima_result.get("order", "(5,1,0)")))
-        st.metric("AIC", f"{arima_result['aic']:.2f}")
-        st.metric("BIC", f"{arima_result['bic']:.2f}")
-        if "test_mae" in arima_result:
-            st.metric("Test MAE", f"${arima_result['test_mae']:.2f}")
-            st.metric("Test RMSE", f"${arima_result['test_rmse']:.2f}")
-            st.metric("Test MAPE", f"{arima_result['test_mape']:.2f}%")
-
-        forecast_end = arima_result["forecast"].iloc[-1]
-        current = price_series.iloc[-1]
-        change = ((forecast_end / current) - 1) * 100
-        st.metric("Forecast (End)", f"${forecast_end:.2f}", f"{change:+.2f}%")
+        if arima_result is None:
+            st.metric("ARIMA Order", "N/A")
+            st.metric("AIC", "N/A")
+            st.metric("BIC", "N/A")
+        else:
+            st.metric("ARIMA Order", str(arima_result.get("order", "(5,1,0)")))
+            st.metric("AIC", f"{arima_result['aic']:.2f}")
+            st.metric("BIC", f"{arima_result['bic']:.2f}")
+            if "test_mae" in arima_result:
+                st.metric("Test MAE", f"${arima_result['test_mae']:.2f}")
+                st.metric("Test RMSE", f"${arima_result['test_rmse']:.2f}")
+                st.metric("Test MAPE", f"{arima_result['test_mape']:.2f}%")
+            forecast_end = arima_result["forecast"].iloc[-1]
+            current = price_series.iloc[-1]
+            change = ((forecast_end / current) - 1) * 100
+            st.metric("Forecast (End)", f"${forecast_end:.2f}", f"{change:+.2f}%")
 
         st.divider()
         st.subheader("Trend Analysis")
-        trend = predictor.linear_trend_prediction(df)
-        st.metric("Trend Direction", trend["trend"].title())
-        st.metric("R² Score", f"{trend['r_squared']:.4f}")
-        st.metric("Daily Slope", f"{trend['slope']:.4f}")
+        try:
+            trend = predictor.linear_trend_prediction(df)
+            st.metric("Trend Direction", trend["trend"].title())
+            st.metric("R² Score", f"{trend['r_squared']:.4f}")
+            st.metric("Daily Slope", f"{trend['slope']:.4f}")
+        except Exception:
+            st.info("Insufficient data for trend analysis.")
 
 with tab5:
     st.subheader(f"{company_info['name']} ({ticker})")
