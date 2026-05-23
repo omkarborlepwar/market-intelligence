@@ -1,6 +1,6 @@
 # Market Intelligence Platform
 
-[![Streamlit App](https://img.shields.io/badge/Live%20Demo-Streamlit-FF4B4B?logo=streamlit&logoColor=white)](https://market-intelligence.streamlit.app)
+[![Streamlit App](https://img.shields.io/badge/Live%20Demo-Streamlit-FF4B4B?logo=streamlit&logoColor=white)](https://market-intelligence-k69phg2f8tgkzgjxbrgz4g.streamlit.app)
 
 **End-to-end data analysis project** — Real-time stock analysis, NLP sentiment tracking, statistical modeling, and price prediction, all wrapped in an interactive Streamlit dashboard.
 
