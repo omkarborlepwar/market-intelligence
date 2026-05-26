@@ -10,7 +10,12 @@ try:
 except ImportError:
     YFRateLimitError = None
 
-CACHE_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "cache"
+_BASE = Path(__file__).resolve().parent.parent.parent
+CACHE_DIRS = [
+    _BASE / "data" / "cache",
+    Path.cwd() / "data" / "cache",
+]
+CACHE_DIR = CACHE_DIRS[0]
 
 
 def _rate_limit_safe_request(fn, max_retries=5, base_delay=3):
@@ -35,20 +40,22 @@ class StockDataCollector:
         self.cache = {}
         self.info_cache = {}
         self._use_cache = True
-        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        for d in CACHE_DIRS:
+            d.mkdir(parents=True, exist_ok=True)
 
     def _get_ticker(self, ticker):
         stock = yf.Ticker(ticker)
         return stock
 
-    def _cache_path(self, ticker, period, interval="1d"):
-        return CACHE_DIR / f"{ticker}_{period}_{interval}.csv"
-
-    def _info_cache_path(self, ticker):
-        return CACHE_DIR / f"{ticker}_info.json"
+    def _resolve_path(self, filename):
+        for d in CACHE_DIRS:
+            p = d / filename
+            if p.exists():
+                return p
+        return CACHE_DIRS[0] / filename
 
     def _load_cached_df(self, ticker, period, interval="1d"):
-        path = self._cache_path(ticker, period, interval)
+        path = self._resolve_path(f"{ticker}_{period}_{interval}.csv")
         if path.exists():
             df = pd.read_csv(path, parse_dates=["date"])
             df["ticker"] = ticker
@@ -56,17 +63,17 @@ class StockDataCollector:
         return None
 
     def _save_cached_df(self, df, ticker, period, interval="1d"):
-        path = self._cache_path(ticker, period, interval)
+        path = CACHE_DIRS[0] / f"{ticker}_{period}_{interval}.csv"
         df.to_csv(path, index=False)
 
     def _load_cached_info(self, ticker):
-        path = self._info_cache_path(ticker)
+        path = self._resolve_path(f"{ticker}_info.json")
         if path.exists():
             return pd.read_json(path, typ="series").to_dict()
         return None
 
     def _save_cached_info(self, info, ticker):
-        path = self._info_cache_path(ticker)
+        path = CACHE_DIRS[0] / f"{ticker}_info.json"
         pd.Series(info).to_json(path)
 
     def fetch_historical(self, ticker, period="6mo", interval="1d"):

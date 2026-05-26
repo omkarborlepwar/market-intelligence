@@ -14,7 +14,6 @@ from analysis.statistics import StatisticalAnalyzer
 from analysis.correlation import CorrelationAnalyzer
 from models.predictor import PricePredictor
 from visualization.charts import ChartBuilder
-from yfinance.exceptions import YFRateLimitError
 
 st.set_page_config(
     page_title="Market Intelligence Platform",
@@ -32,15 +31,6 @@ st.markdown("""
     .metric-card { background: #f8fafc; border-radius: 8px; padding: 1rem; border: 1px solid #e2e8f0; }
 </style>
 """, unsafe_allow_html=True)
-
-
-@st.cache_data(ttl=3600)
-def load_stock_data(ticker, period):
-    collector = StockDataCollector()
-    df = collector.fetch_historical(ticker, period)
-    df = collector.compute_returns(df)
-    df = collector.add_technical_indicators(df)
-    return df, collector.get_company_info(ticker)
 
 
 @st.cache_data(ttl=1800)
@@ -75,20 +65,33 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs(
 )
 
 try:
-    df, company_info = load_stock_data(ticker, period)
-except YFRateLimitError:
-    st.error("""
-        ⚠️ **Yahoo Finance API rate limit reached.**  
-        No cached data is available yet for this ticker.  
-        The free yfinance API has tight request limits on Streamlit Cloud.  
-        **Suggestions:**  
-        - Wait a minute and refresh the page  
-        - Run locally to seed the cache  
-        - Try a different ticker
-    """)
-    st.stop()
-except Exception as e:
-    st.error(f"Failed to load stock data: {e}")
+    collector = StockDataCollector()
+    df = collector.fetch_historical(ticker, period)
+    df = collector.compute_returns(df)
+    df = collector.add_technical_indicators(df)
+    company_info = collector.get_company_info(ticker)
+except Exception:
+    from pathlib import Path as _P
+    expected_csv = f"{ticker}_{period}_1d.csv"
+    expected_json = f"{ticker}_info.json"
+    cwd = _P.cwd()
+    fallback_paths = [
+        cwd / "data" / "cache",
+        _P(__file__).resolve().parent.parent / "data" / "cache",
+    ]
+    diag_parts = [f"Looking for: {expected_csv}"]
+    for p in fallback_paths:
+        exists = p.exists()
+        files_list = list(p.iterdir()) if exists else []
+        diag_parts.append(f"  {p} exists={exists}, files={len(files_list)}")
+        diag_parts.append(f"  has_csv={ (p / expected_csv).exists() }, has_json={ (p / expected_json).exists() }")
+
+    st.error(f"⚠️ **Yahoo Finance API rate limit** — no cached data for **{ticker} ({period})**.")
+    with st.expander("Diagnostic info"):
+        st.code("\n".join(diag_parts))
+    if st.button("🔄 Retry"):
+        st.cache_data.clear()
+        st.rerun()
     st.stop()
 
 # Warn if data is stale (older than 1 trading day)
