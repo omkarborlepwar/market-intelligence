@@ -77,12 +77,27 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs(
 try:
     df, company_info = load_stock_data(ticker, period)
 except YFRateLimitError:
-    st.error("⚠️ Yahoo Finance API rate limit reached. Please wait a moment and try again, or select a different ticker.")
-    st.info("The free yfinance API has request limits. Try switching tickers or wait 30-60 seconds.")
+    st.error("""
+        ⚠️ **Yahoo Finance API rate limit reached.**  
+        No cached data is available yet for this ticker.  
+        The free yfinance API has tight request limits on Streamlit Cloud.  
+        **Suggestions:**  
+        - Wait a minute and refresh the page  
+        - Run locally to seed the cache  
+        - Try a different ticker
+    """)
     st.stop()
 except Exception as e:
     st.error(f"Failed to load stock data: {e}")
     st.stop()
+
+# Warn if data is stale (older than 1 trading day)
+last_date = df["date"].max()
+if isinstance(last_date, pd.Timestamp):
+    age = pd.Timestamp.now() - last_date
+    if age > timedelta(days=2):
+        st.warning(f"Showing cached data from {last_date.strftime('%Y-%m-%d')}. Yahoo Finance API is currently unavailable.")
+
 news_df, daily_sentiment = load_news(ticker)
 
 with tab1:

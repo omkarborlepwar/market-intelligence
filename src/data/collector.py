@@ -2,16 +2,18 @@ import random
 import time
 import yfinance as yf
 import pandas as pd
-import requests
 from datetime import datetime, timedelta
+from pathlib import Path
 
 try:
     from yfinance.exceptions import YFRateLimitError
 except ImportError:
     YFRateLimitError = None
 
+CACHE_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "cache"
 
-def _rate_limit_safe_request(fn, max_retries=5, base_delay=2):
+
+def _rate_limit_safe_request(fn, max_retries=5, base_delay=3):
     for attempt in range(max_retries):
         try:
             return fn()
@@ -22,9 +24,9 @@ def _rate_limit_safe_request(fn, max_retries=5, base_delay=2):
             ) or "rate" in str(exc).lower()
             if attempt >= max_retries - 1:
                 raise
-            delay = base_delay * (2 ** attempt) + random.uniform(0, 1)
+            delay = base_delay * (3 ** attempt) + random.uniform(0, 2)
             if is_rate_limit:
-                delay = max(delay, 10)
+                delay = max(delay, 15)
             time.sleep(delay)
 
 
@@ -32,25 +34,63 @@ class StockDataCollector:
     def __init__(self):
         self.cache = {}
         self.info_cache = {}
-        self.session = requests.Session()
-        self.session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        })
+        self._use_cache = True
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
     def _get_ticker(self, ticker):
-        stock = yf.Ticker(ticker, session=self.session)
+        stock = yf.Ticker(ticker)
         return stock
+
+    def _cache_path(self, ticker, period, interval="1d"):
+        return CACHE_DIR / f"{ticker}_{period}_{interval}.csv"
+
+    def _info_cache_path(self, ticker):
+        return CACHE_DIR / f"{ticker}_info.json"
+
+    def _load_cached_df(self, ticker, period, interval="1d"):
+        path = self._cache_path(ticker, period, interval)
+        if path.exists():
+            df = pd.read_csv(path, parse_dates=["date"])
+            df["ticker"] = ticker
+            return df
+        return None
+
+    def _save_cached_df(self, df, ticker, period, interval="1d"):
+        path = self._cache_path(ticker, period, interval)
+        df.to_csv(path, index=False)
+
+    def _load_cached_info(self, ticker):
+        path = self._info_cache_path(ticker)
+        if path.exists():
+            return pd.read_json(path, typ="series").to_dict()
+        return None
+
+    def _save_cached_info(self, info, ticker):
+        path = self._info_cache_path(ticker)
+        pd.Series(info).to_json(path)
 
     def fetch_historical(self, ticker, period="6mo", interval="1d"):
         cache_key = f"{ticker}_{period}_{interval}"
         if cache_key in self.cache:
             return self.cache[cache_key]
+        if self._use_cache:
+            cached = self._load_cached_df(ticker, period, interval)
+            if cached is not None:
+                self.cache[cache_key] = cached
+                return cached
         stock = self._get_ticker(ticker)
 
         def _fetch():
             return stock.history(period=period, interval=interval)
 
-        df = _rate_limit_safe_request(_fetch)
+        try:
+            df = _rate_limit_safe_request(_fetch)
+        except Exception:
+            cached = self._load_cached_df(ticker, period, interval)
+            if cached is not None:
+                return cached
+            raise
+
         df.reset_index(inplace=True)
         df.rename(columns={
             "Date": "date", "Open": "open", "High": "high",
@@ -59,6 +99,7 @@ class StockDataCollector:
         df["ticker"] = ticker
         df["date"] = pd.to_datetime(df["date"]).dt.tz_localize(None)
         self.cache[cache_key] = df
+        self._save_cached_df(df, ticker, period, interval)
         return df
 
     def fetch_multiple(self, tickers, period="6mo", interval="1d"):
@@ -73,12 +114,24 @@ class StockDataCollector:
     def get_company_info(self, ticker):
         if ticker in self.info_cache:
             return self.info_cache[ticker]
+        if self._use_cache:
+            cached = self._load_cached_info(ticker)
+            if cached is not None:
+                self.info_cache[ticker] = cached
+                return cached
         stock = self._get_ticker(ticker)
 
         def _info():
             return stock.info
 
-        info = _rate_limit_safe_request(_info)
+        try:
+            info = _rate_limit_safe_request(_info)
+        except Exception:
+            cached = self._load_cached_info(ticker)
+            if cached is not None:
+                return cached
+            raise
+
         result = {
             "name": info.get("longName", ticker),
             "sector": info.get("sector", "N/A"),
@@ -90,6 +143,7 @@ class StockDataCollector:
             "52w_low": info.get("fiftyTwoWeekLow", 0),
         }
         self.info_cache[ticker] = result
+        self._save_cached_info(result, ticker)
         return result
 
     def compute_returns(self, df):
