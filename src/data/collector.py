@@ -1,18 +1,56 @@
+import random
+import time
 import yfinance as yf
 import pandas as pd
+import requests
 from datetime import datetime, timedelta
+
+try:
+    from yfinance.exceptions import YFRateLimitError
+except ImportError:
+    YFRateLimitError = None
+
+
+def _rate_limit_safe_request(fn, max_retries=5, base_delay=2):
+    for attempt in range(max_retries):
+        try:
+            return fn()
+        except Exception as exc:
+            is_rate_limit = (
+                YFRateLimitError is not None
+                and isinstance(exc, YFRateLimitError)
+            ) or "rate" in str(exc).lower()
+            if attempt >= max_retries - 1:
+                raise
+            delay = base_delay * (2 ** attempt) + random.uniform(0, 1)
+            if is_rate_limit:
+                delay = max(delay, 10)
+            time.sleep(delay)
 
 
 class StockDataCollector:
     def __init__(self):
         self.cache = {}
+        self.info_cache = {}
+        self.session = requests.Session()
+        self.session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        })
+
+    def _get_ticker(self, ticker):
+        stock = yf.Ticker(ticker, session=self.session)
+        return stock
 
     def fetch_historical(self, ticker, period="6mo", interval="1d"):
         cache_key = f"{ticker}_{period}_{interval}"
         if cache_key in self.cache:
             return self.cache[cache_key]
-        stock = yf.Ticker(ticker)
-        df = stock.history(period=period, interval=interval)
+        stock = self._get_ticker(ticker)
+
+        def _fetch():
+            return stock.history(period=period, interval=interval)
+
+        df = _rate_limit_safe_request(_fetch)
         df.reset_index(inplace=True)
         df.rename(columns={
             "Date": "date", "Open": "open", "High": "high",
@@ -25,15 +63,23 @@ class StockDataCollector:
 
     def fetch_multiple(self, tickers, period="6mo", interval="1d"):
         frames = []
-        for t in tickers:
+        for i, t in enumerate(tickers):
             df = self.fetch_historical(t, period, interval)
             frames.append(df)
+            if i < len(tickers) - 1:
+                time.sleep(1.5)
         return pd.concat(frames, ignore_index=True)
 
     def get_company_info(self, ticker):
-        stock = yf.Ticker(ticker)
-        info = stock.info
-        return {
+        if ticker in self.info_cache:
+            return self.info_cache[ticker]
+        stock = self._get_ticker(ticker)
+
+        def _info():
+            return stock.info
+
+        info = _rate_limit_safe_request(_info)
+        result = {
             "name": info.get("longName", ticker),
             "sector": info.get("sector", "N/A"),
             "industry": info.get("industry", "N/A"),
@@ -43,6 +89,8 @@ class StockDataCollector:
             "52w_high": info.get("fiftyTwoWeekHigh", 0),
             "52w_low": info.get("fiftyTwoWeekLow", 0),
         }
+        self.info_cache[ticker] = result
+        return result
 
     def compute_returns(self, df):
         df = df.copy()

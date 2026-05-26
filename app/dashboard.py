@@ -14,6 +14,7 @@ from analysis.statistics import StatisticalAnalyzer
 from analysis.correlation import CorrelationAnalyzer
 from models.predictor import PricePredictor
 from visualization.charts import ChartBuilder
+from yfinance.exceptions import YFRateLimitError
 
 st.set_page_config(
     page_title="Market Intelligence Platform",
@@ -73,7 +74,15 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs(
     ["📊 Price Analysis", "📰 Sentiment", "🔗 Correlations", "🔮 Predictions", "ℹ️ Company Info"]
 )
 
-df, company_info = load_stock_data(ticker, period)
+try:
+    df, company_info = load_stock_data(ticker, period)
+except YFRateLimitError:
+    st.error("⚠️ Yahoo Finance API rate limit reached. Please wait a moment and try again, or select a different ticker.")
+    st.info("The free yfinance API has request limits. Try switching tickers or wait 30-60 seconds.")
+    st.stop()
+except Exception as e:
+    st.error(f"Failed to load stock data: {e}")
+    st.stop()
 news_df, daily_sentiment = load_news(ticker)
 
 with tab1:
@@ -166,7 +175,11 @@ with tab3:
     st.subheader("Stock Correlation Matrix")
     st.markdown("Correlation of daily returns across selected stocks (last 6 months)")
     collector = StockDataCollector()
-    multi_df = collector.fetch_multiple(tickers, "6mo")
+    try:
+        multi_df = collector.fetch_multiple(tickers, "6mo")
+    except Exception:
+        multi_df = pd.DataFrame()
+        st.error("Failed to fetch correlation data due to API rate limits. Try again later.")
     if len(multi_df) > 0:
         corr_matrix = CorrelationAnalyzer.sector_correlation_matrix(multi_df)
         st.plotly_chart(ChartBuilder.correlation_heatmap(corr_matrix), use_container_width=True)
